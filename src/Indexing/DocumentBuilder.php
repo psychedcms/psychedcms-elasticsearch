@@ -8,6 +8,7 @@ use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\EntityManagerInterface;
 use Gedmo\Translatable\Entity\Repository\TranslationRepository;
 use PsychedCms\Elasticsearch\Attribute\IndexedField;
+use PsychedCms\Elasticsearch\Attribute\IndexedRelation;
 
 class DocumentBuilder
 {
@@ -39,6 +40,12 @@ class DocumentBuilder
             }
 
             $document[$propertyName] = $this->normalizeValue($value, $attribute);
+        }
+
+        // Process IndexedRelation attributes
+        $relations = $this->metadataReader->getIndexedRelations($entityClass);
+        foreach ($relations as $propertyName => $relation) {
+            $document[$propertyName] = $this->buildRelationData($entity, $propertyName, $relation);
         }
 
         return $document;
@@ -75,6 +82,16 @@ class DocumentBuilder
             $updatedAt = $entity->getUpdatedAt();
             if ($updatedAt instanceof \DateTimeInterface) {
                 $document['_updated_at'] = $updatedAt->format('c');
+            }
+        }
+
+        if (method_exists($entity, 'getAuthor')) {
+            $author = $entity->getAuthor();
+            if ($author !== null && method_exists($author, 'getId') && method_exists($author, 'getUsername')) {
+                $document['_author'] = [
+                    'id' => $author->getId(),
+                    'username' => $author->getUsername(),
+                ];
             }
         }
 
@@ -116,11 +133,35 @@ class DocumentBuilder
             return $items;
         }
 
+        if (\is_object($value) && $attribute->type === 'object') {
+            return $this->normalizeObjectField($value, $attribute);
+        }
+
         if (\is_array($value) && $attribute->type === 'geo_point') {
             return $this->normalizeGeoPoint($value);
         }
 
         return $value;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeObjectField(object $value, IndexedField $attribute): array
+    {
+        if ($attribute->properties !== null) {
+            $data = [];
+            foreach ($attribute->properties as $propName => $propConfig) {
+                $getter = 'get' . ucfirst($propName);
+                if (method_exists($value, $getter)) {
+                    $data[$propName] = $this->normalizeScalar($value->{$getter}());
+                }
+            }
+
+            return $data;
+        }
+
+        return $this->normalizeCollectionItem($value);
     }
 
     /**
@@ -161,6 +202,91 @@ class DocumentBuilder
             'lat' => (float) $lat,
             'lon' => (float) $lon,
         ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function buildRelationData(object $entity, string $propertyName, IndexedRelation $relation): array
+    {
+        $reflectionClass = new \ReflectionClass($entity);
+        $property = $reflectionClass->getProperty($propertyName);
+        $property->setAccessible(true);
+        $collection = $property->getValue($entity);
+
+        if (!$collection instanceof \Traversable) {
+            return [];
+        }
+
+        $items = [];
+        foreach ($collection as $child) {
+            $item = [];
+            foreach ($relation->fields as $fieldName => $fieldConfig) {
+                /** @var string $resolve */
+                $resolve = $fieldConfig['resolve'] ?? $fieldName;
+                $value = $this->resolvePropertyPath($child, $resolve);
+
+                /** @var string $fieldType */
+                $fieldType = $fieldConfig['type'] ?? 'text';
+
+                if ($fieldType === 'object' && \is_object($value)) {
+                    $subDoc = [];
+                    /** @var array<string, array<string, mixed>> $subProperties */
+                    $subProperties = $fieldConfig['properties'] ?? [];
+                    foreach ($subProperties as $subName => $subConfig) {
+                        /** @var string $subResolve */
+                        $subResolve = $subConfig['resolve'] ?? $subName;
+                        $subValue = $this->resolvePropertyPath($value, $subResolve);
+                        $subDoc[$subName] = $this->normalizeScalar($subValue);
+                    }
+                    $item[$fieldName] = $subDoc;
+                } else {
+                    $item[$fieldName] = $this->normalizeScalar($value);
+                }
+            }
+            $items[] = $item;
+        }
+
+        return $items;
+    }
+
+    private function resolvePropertyPath(object $object, string $path): mixed
+    {
+        $segments = explode('.', $path);
+        $current = $object;
+
+        foreach ($segments as $segment) {
+            if (!\is_object($current)) {
+                return null;
+            }
+
+            $getter = 'get' . ucfirst($segment);
+            if (method_exists($current, $getter)) {
+                $current = $current->{$getter}();
+                continue;
+            }
+
+            // Try direct property access
+            try {
+                $ref = new \ReflectionClass($current);
+                $prop = $ref->getProperty($segment);
+                $prop->setAccessible(true);
+                $current = $prop->getValue($current);
+            } catch (\ReflectionException) {
+                return null;
+            }
+        }
+
+        return $current;
+    }
+
+    private function normalizeScalar(mixed $value): mixed
+    {
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('c');
+        }
+
+        return $value;
     }
 
     private function isTranslatable(object $entity, string $propertyName): bool

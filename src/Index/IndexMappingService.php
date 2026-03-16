@@ -6,6 +6,7 @@ namespace PsychedCms\Elasticsearch\Index;
 
 use Doctrine\Common\Collections\Collection;
 use PsychedCms\Elasticsearch\Attribute\IndexedField;
+use PsychedCms\Elasticsearch\Attribute\IndexedRelation;
 use PsychedCms\Elasticsearch\Indexing\EntityMetadataReader;
 
 final class IndexMappingService
@@ -30,10 +31,23 @@ final class IndexMappingService
         $properties['_locale'] = ['type' => 'keyword'];
         $properties['_created_at'] = ['type' => 'date'];
         $properties['_updated_at'] = ['type' => 'date'];
+        $properties['_author'] = [
+            'type' => 'object',
+            'properties' => [
+                'id' => ['type' => 'integer'],
+                'username' => ['type' => 'keyword'],
+            ],
+        ];
 
         foreach ($fields as $propertyName => $attribute) {
             $esType = $this->resolveEsType($entityClass, $propertyName, $attribute);
             $properties[$propertyName] = $this->buildFieldMapping($attribute, $esType);
+        }
+
+        // Process IndexedRelation attributes
+        $relations = $this->metadataReader->getIndexedRelations($entityClass);
+        foreach ($relations as $propertyName => $relation) {
+            $properties[$propertyName] = $this->buildRelationMapping($relation);
         }
 
         return ['properties' => $properties];
@@ -70,6 +84,83 @@ final class IndexMappingService
         ];
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildRelationMapping(IndexedRelation $relation): array
+    {
+        $mapping = ['type' => $relation->type];
+        $subProperties = [];
+
+        foreach ($relation->fields as $fieldName => $fieldConfig) {
+            $fieldType = $fieldConfig['type'] ?? 'text';
+            $enabled = $fieldConfig['enabled'] ?? true;
+
+            if (!$enabled) {
+                $subProperties[$fieldName] = ['type' => 'object', 'enabled' => false];
+                continue;
+            }
+
+            if ($fieldType === 'object' || $fieldType === 'nested') {
+                $subMapping = ['type' => $fieldType];
+                /** @var array<string, array<string, mixed>> $nestedFieldProps */
+                $nestedFieldProps = $fieldConfig['properties'] ?? [];
+                if ($nestedFieldProps !== []) {
+                    $nestedProps = [];
+                    foreach ($nestedFieldProps as $subName => $subConfig) {
+                        $nestedProps[$subName] = $this->buildRelationSubFieldMapping($subConfig);
+                    }
+                    $subMapping['properties'] = $nestedProps;
+                }
+                $subProperties[$fieldName] = $subMapping;
+            } else {
+                $subProperties[$fieldName] = $this->buildRelationSubFieldMapping($fieldConfig);
+            }
+        }
+
+        if ($subProperties !== []) {
+            $mapping['properties'] = $subProperties;
+        }
+
+        return $mapping;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return array<string, mixed>
+     */
+    private function buildRelationSubFieldMapping(array $config): array
+    {
+        $type = $config['type'] ?? 'text';
+
+        if (\in_array($type, ['date', 'integer', 'float', 'boolean', 'keyword', 'geo_point'], true)) {
+            $mapping = ['type' => $type];
+        } else {
+            $mapping = ['type' => 'text'];
+        }
+
+        $autocomplete = $config['autocomplete'] ?? false;
+        if ($autocomplete && $type !== 'keyword') {
+            $mapping['fields'] = [
+                'autocomplete' => [
+                    'type' => 'text',
+                    'analyzer' => 'autocomplete_analyzer',
+                    'search_analyzer' => 'autocomplete_search_analyzer',
+                ],
+            ];
+        } elseif ($autocomplete && $type === 'keyword') {
+            $mapping['fields'] = [
+                'autocomplete' => [
+                    'type' => 'text',
+                    'analyzer' => 'autocomplete_analyzer',
+                    'search_analyzer' => 'autocomplete_search_analyzer',
+                ],
+            ];
+        }
+
+        return $mapping;
+    }
+
     private function resolveEsType(string $entityClass, string $propertyName, IndexedField $attribute): string
     {
         if ($attribute->type !== null) {
@@ -95,6 +186,11 @@ final class IndexMappingService
      */
     private function buildFieldMapping(IndexedField $attribute, string $esType): array
     {
+        // enabled: false — stored in _source but not indexed (for display-only data)
+        if (!$attribute->enabled) {
+            return ['type' => 'object', 'enabled' => false];
+        }
+
         if ($esType === 'geo_point') {
             return ['type' => 'geo_point'];
         }

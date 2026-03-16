@@ -7,6 +7,7 @@ namespace PsychedCms\Elasticsearch\Indexing;
 use Doctrine\ORM\EntityManagerInterface;
 use PsychedCms\Elasticsearch\Attribute\Indexed;
 use PsychedCms\Elasticsearch\Attribute\IndexedField;
+use PsychedCms\Elasticsearch\Attribute\IndexedRelation;
 
 final class EntityMetadataReader
 {
@@ -15,6 +16,9 @@ final class EntityMetadataReader
 
     /** @var array<string, array<string, IndexedField>> */
     private array $fieldsCache = [];
+
+    /** @var array<string, array<string, IndexedRelation>> */
+    private array $relationsCache = [];
 
     /** @var array<string>|null */
     private ?array $indexedEntitiesCache = null;
@@ -91,6 +95,30 @@ final class EntityMetadataReader
         $this->indexedEntitiesCache = $entities;
 
         return $entities;
+    }
+
+    /**
+     * @return array<string, IndexedRelation>
+     */
+    public function getIndexedRelations(string $entityClass): array
+    {
+        if (isset($this->relationsCache[$entityClass])) {
+            return $this->relationsCache[$entityClass];
+        }
+
+        $relations = [];
+        $reflectionClass = new \ReflectionClass($entityClass);
+
+        foreach ($reflectionClass->getProperties() as $property) {
+            $attributes = $property->getAttributes(IndexedRelation::class);
+            if ($attributes !== []) {
+                $relations[$property->getName()] = $attributes[0]->newInstance();
+            }
+        }
+
+        $this->relationsCache[$entityClass] = $relations;
+
+        return $relations;
     }
 
     /**

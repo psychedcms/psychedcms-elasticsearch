@@ -18,6 +18,7 @@ class IndexedField
         public readonly bool $sortable = false,
         public readonly bool $facetable = false,
         public readonly ?array $properties = null,
+        public readonly bool $enabled = true,
     ) {
     }
 }
