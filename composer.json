@@ -1,0 +1,26 @@
+{
+    "name": "psychedcms/psychedcms-elasticsearch",
+    "description": "Elasticsearch client, indexing, attributes, and index management for PsychedCMS",
+    "type": "symfony-bundle",
+    "license": "proprietary",
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "require": {
+        "php": ">=8.3",
+        "psychedcms/psychedcms-core": "^1.0 || @dev",
+        "elasticsearch/elasticsearch": "^8.0",
+        "symfony/messenger": "^7.4",
+        "symfony/console": "^7.4",
+        "doctrine/orm": "^3.0",
+        "psr/log": "^3.0",
+        "gedmo/doctrine-extensions": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "PsychedCms\\Elasticsearch\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

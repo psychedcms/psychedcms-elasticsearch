@@ -1,0 +1,26 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    PsychedCms\Elasticsearch\:
+        resource: '../src/'
+        exclude:
+            - '../src/Attribute/'
+            - '../src/Exception/'
+            - '../src/Message/'
+            - '../src/PsychedCmsElasticsearchBundle.php'
+
+    PsychedCms\Elasticsearch\Client\ElasticsearchClientInterface:
+        alias: PsychedCms\Elasticsearch\Client\ElasticsearchClient
+
+    PsychedCms\Elasticsearch\Indexing\ContentIndexerInterface:
+        alias: PsychedCms\Elasticsearch\Indexing\ContentIndexer
+
+    PsychedCms\Elasticsearch\Client\ElasticsearchClientFactory:
+        arguments:
+            $elasticsearchUrl: '%env(default::ELASTICSEARCH_URL)%'
+
+    PsychedCms\Elasticsearch\Index\IndexNameResolver:
+        arguments:
+            $indexPrefix: '%env(default::ELASTICSEARCH_INDEX_PREFIX)%'
