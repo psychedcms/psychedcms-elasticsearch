@@ -144,7 +144,9 @@ final class ContentIndexer implements ContentIndexerInterface
     private function getEntityId(object $entity): int|string
     {
         if (method_exists($entity, 'getId')) {
-            return $entity->getId();
+            $id = $entity->getId();
+
+            return $id instanceof \Stringable ? (string) $id : $id;
         }
 
         throw new \RuntimeException(sprintf('Entity %s does not have a getId() method.', $entity::class));

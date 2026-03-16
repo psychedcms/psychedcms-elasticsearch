@@ -41,9 +41,10 @@ final readonly class IndexingListener
         $entity = $args->getObject();
 
         if ($this->metadataReader->isIndexed($entity::class) && method_exists($entity, 'getId')) {
+            $id = $entity->getId();
             $this->messageBus->dispatch(new RemoveContentMessage(
                 $entity::class,
-                $entity->getId(),
+                $id instanceof \Stringable ? (string) $id : $id,
             ));
 
             return;
@@ -56,9 +57,10 @@ final readonly class IndexingListener
     private function handleIndexing(object $entity): void
     {
         if ($this->metadataReader->isIndexed($entity::class) && method_exists($entity, 'getId')) {
+            $id = $entity->getId();
             $this->messageBus->dispatch(new IndexContentMessage(
                 $entity::class,
-                $entity->getId(),
+                $id instanceof \Stringable ? (string) $id : $id,
             ));
 
             return;
@@ -81,9 +83,10 @@ final readonly class IndexingListener
             return;
         }
 
+        $parentId = $parent->getId();
         $this->messageBus->dispatch(new IndexContentMessage(
             $parent::class,
-            $parent->getId(),
+            $parentId instanceof \Stringable ? (string) $parentId : $parentId,
         ));
     }
 

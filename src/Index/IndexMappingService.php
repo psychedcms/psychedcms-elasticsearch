@@ -34,7 +34,7 @@ final class IndexMappingService
         $properties['_author'] = [
             'type' => 'object',
             'properties' => [
-                'id' => ['type' => 'integer'],
+                'id' => ['type' => 'keyword'],
                 'username' => ['type' => 'keyword'],
             ],
         ];
@@ -202,7 +202,7 @@ final class IndexMappingService
             } else {
                 // Default sub-properties for relations
                 $mapping['properties'] = [
-                    'id' => ['type' => 'integer'],
+                    'id' => ['type' => 'keyword'],
                     'name' => ['type' => 'keyword'],
                 ];
             }

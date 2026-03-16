@@ -88,8 +88,9 @@ class DocumentBuilder
         if (method_exists($entity, 'getAuthor')) {
             $author = $entity->getAuthor();
             if ($author !== null && method_exists($author, 'getId') && method_exists($author, 'getUsername')) {
+                $authorId = $author->getId();
                 $document['_author'] = [
-                    'id' => $author->getId(),
+                    'id' => $authorId instanceof \Stringable ? (string) $authorId : $authorId,
                     'username' => $author->getUsername(),
                 ];
             }
@@ -172,7 +173,8 @@ class DocumentBuilder
         $data = ['id' => null];
 
         if (method_exists($item, 'getId')) {
-            $data['id'] = $item->getId();
+            $id = $item->getId();
+            $data['id'] = $id instanceof \Stringable ? (string) $id : $id;
         }
 
         // Try common display field methods
