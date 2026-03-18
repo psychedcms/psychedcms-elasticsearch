@@ -56,8 +56,13 @@ final class IndexMappingService
     /**
      * @return array<string, mixed>
      */
-    public function getIndexSettings(): array
+    public function getIndexSettings(string $locale = 'fr'): array
     {
+        $languageAnalyzer = match ($locale) {
+            'en' => 'english',
+            default => 'french',
+        };
+
         return [
             'analysis' => [
                 'analyzer' => [
@@ -70,6 +75,9 @@ final class IndexMappingService
                         'type' => 'custom',
                         'tokenizer' => 'standard',
                         'filter' => ['lowercase'],
+                    ],
+                    'content_analyzer' => [
+                        'type' => $languageAnalyzer,
                     ],
                 ],
                 'tokenizer' => [

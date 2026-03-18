@@ -34,13 +34,13 @@ final readonly class PublicSearchController
         /** @var string[] $contentTypes */
         $contentTypes = $request->query->all('contentTypes');
 
-        $indexNames = $this->resolveIndexNames($contentTypes);
+        $indexNames = $this->resolveIndexNames($contentTypes, $locale);
 
         if ($indexNames === []) {
             return $this->emptyResponse();
         }
 
-        $query = $this->buildQuery($locale, $page, $itemsPerPage, $contentTypes, $request);
+        $query = $this->buildQuery($page, $itemsPerPage, $contentTypes, $request);
 
         try {
             $response = $this->client->search($indexNames, $query);
@@ -55,14 +55,14 @@ final readonly class PublicSearchController
      * @param string[] $contentTypes
      * @return string[]
      */
-    private function resolveIndexNames(array $contentTypes): array
+    private function resolveIndexNames(array $contentTypes, string $locale = 'fr'): array
     {
         $contentTypeMap = $this->buildContentTypeMap();
 
         if ($contentTypes === []) {
             $indexNames = [];
             foreach ($this->metadataReader->getIndexedEntities() as $entityClass) {
-                $indexNames[] = $this->nameResolver->resolve($entityClass);
+                $indexNames[] = $this->nameResolver->resolveForLocale($entityClass, $locale);
             }
 
             return $indexNames;
@@ -72,7 +72,7 @@ final readonly class PublicSearchController
         foreach ($contentTypes as $ct) {
             $entityClass = $contentTypeMap[$ct] ?? null;
             if ($entityClass !== null && $this->metadataReader->isIndexed($entityClass)) {
-                $indexNames[] = $this->nameResolver->resolve($entityClass);
+                $indexNames[] = $this->nameResolver->resolveForLocale($entityClass, $locale);
             }
         }
 
@@ -107,12 +107,11 @@ final readonly class PublicSearchController
      * @param string[] $contentTypes
      * @return array<string, mixed>
      */
-    private function buildQuery(string $locale, int $page, int $itemsPerPage, array $contentTypes, Request $request): array
+    private function buildQuery(int $page, int $itemsPerPage, array $contentTypes, Request $request): array
     {
         $from = ($page - 1) * $itemsPerPage;
 
         $filters = [
-            ['term' => ['_locale' => $locale]],
             ['term' => ['_status' => 'published']],
         ];
 

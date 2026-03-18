@@ -21,22 +21,27 @@ final class IndexManager
 
     public function createIndex(string $entityClass): void
     {
-        $indexName = $this->nameResolver->resolve($entityClass);
-        $settings = $this->mappingService->getIndexSettings();
         $mappings = $this->mappingService->getMappingForEntity($entityClass);
+        $localeIndices = $this->nameResolver->resolveAllLocales($entityClass);
 
-        $this->client->createIndex($indexName, $settings, $mappings);
+        foreach ($localeIndices as $locale => $indexName) {
+            $settings = $this->mappingService->getIndexSettings($locale);
+            $this->client->createIndex($indexName, $settings, $mappings);
 
-        $this->logger?->info('Created index', ['index' => $indexName, 'entity' => $entityClass]);
+            $this->logger?->info('Created index', ['index' => $indexName, 'entity' => $entityClass, 'locale' => $locale]);
+        }
     }
 
     public function deleteIndex(string $entityClass): void
     {
-        $indexName = $this->nameResolver->resolve($entityClass);
+        $localeIndices = $this->nameResolver->resolveAllLocales($entityClass);
 
-        $this->client->deleteIndex($indexName);
-
-        $this->logger?->info('Deleted index', ['index' => $indexName, 'entity' => $entityClass]);
+        foreach ($localeIndices as $locale => $indexName) {
+            if ($this->client->indexExists($indexName)) {
+                $this->client->deleteIndex($indexName);
+                $this->logger?->info('Deleted index', ['index' => $indexName, 'entity' => $entityClass, 'locale' => $locale]);
+            }
+        }
     }
 
     public function recreateIndex(string $entityClass): void
@@ -46,29 +51,53 @@ final class IndexManager
     }
 
     /**
+     * Delete legacy (non-locale) index if it exists.
+     */
+    public function deleteLegacyIndex(string $entityClass): bool
+    {
+        $legacyName = $this->nameResolver->resolve($entityClass);
+
+        if ($this->client->indexExists($legacyName)) {
+            $this->client->deleteIndex($legacyName);
+            $this->logger?->info('Deleted legacy index', ['index' => $legacyName]);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function getIndexStatus(string $entityClass): array
     {
-        $indexName = $this->nameResolver->resolve($entityClass);
-        $exists = $this->client->indexExists($indexName);
+        $localeIndices = $this->nameResolver->resolveAllLocales($entityClass);
+        $statuses = [];
 
-        $status = [
-            'index' => $indexName,
-            'entity' => $entityClass,
-            'exists' => $exists,
-        ];
+        foreach ($localeIndices as $locale => $indexName) {
+            $exists = $this->client->indexExists($indexName);
 
-        if ($exists) {
-            $info = $this->client->getIndexInfo($indexName);
-            if ($info !== null) {
-                $indexStats = $info['stats']['indices'][$indexName] ?? [];
-                $status['docs_count'] = $indexStats['primaries']['docs']['count'] ?? 0;
-                $status['size'] = $indexStats['primaries']['store']['size_in_bytes'] ?? 0;
+            $status = [
+                'index' => $indexName,
+                'entity' => $entityClass,
+                'locale' => $locale,
+                'exists' => $exists,
+            ];
+
+            if ($exists) {
+                $info = $this->client->getIndexInfo($indexName);
+                if ($info !== null) {
+                    $indexStats = $info['stats']['indices'][$indexName] ?? [];
+                    $status['docs_count'] = $indexStats['primaries']['docs']['count'] ?? 0;
+                    $status['size'] = $indexStats['primaries']['store']['size_in_bytes'] ?? 0;
+                }
             }
+
+            $statuses[$locale] = $status;
         }
 
-        return $status;
+        return $statuses;
     }
 
     /**
@@ -79,7 +108,11 @@ final class IndexManager
         $statuses = [];
 
         foreach ($this->metadataReader->getIndexedEntities() as $entityClass) {
-            $statuses[$entityClass] = $this->getIndexStatus($entityClass);
+            $localeStatuses = $this->getIndexStatus($entityClass);
+            foreach ($localeStatuses as $locale => $status) {
+                $key = $entityClass . '_' . $locale;
+                $statuses[$key] = $status;
+            }
         }
 
         return $statuses;

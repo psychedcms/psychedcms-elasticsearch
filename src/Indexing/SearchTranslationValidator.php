@@ -7,6 +7,7 @@ namespace PsychedCms\Elasticsearch\Indexing;
 use Doctrine\ORM\EntityManagerInterface;
 use Gedmo\Translatable\Entity\Repository\TranslationRepository;
 use PsychedCms\Core\Attribute\ContentType;
+use Symfony\Component\Validator\Constraints as Assert;
 
 final class SearchTranslationValidator
 {
@@ -70,6 +71,10 @@ final class SearchTranslationValidator
     }
 
     /**
+     * Get translatable fields that are required for publication.
+     * Only returns fields that have both #[Gedmo\Translatable] AND
+     * #[Assert\NotBlank(groups: ['published'])].
+     *
      * @return array<string>
      */
     private function getTranslatableFields(object $entity): array
@@ -78,13 +83,32 @@ final class SearchTranslationValidator
         $reflectionClass = new \ReflectionClass($entity);
 
         foreach ($reflectionClass->getProperties() as $property) {
-            $attributes = $property->getAttributes(\Gedmo\Mapping\Annotation\Translatable::class);
-            if ($attributes !== []) {
-                $fields[] = $property->getName();
+            $translatableAttrs = $property->getAttributes(\Gedmo\Mapping\Annotation\Translatable::class);
+            if ($translatableAttrs === []) {
+                continue;
             }
+
+            if (!$this->hasPublishedValidation($property)) {
+                continue;
+            }
+
+            $fields[] = $property->getName();
         }
 
         return $fields;
+    }
+
+    private function hasPublishedValidation(\ReflectionProperty $property): bool
+    {
+        $notBlankAttrs = $property->getAttributes(Assert\NotBlank::class);
+        foreach ($notBlankAttrs as $attr) {
+            $instance = $attr->newInstance();
+            if (\in_array('published', $instance->groups, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

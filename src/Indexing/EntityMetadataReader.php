@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PsychedCms\Elasticsearch\Indexing;
 
 use Doctrine\ORM\EntityManagerInterface;
+use PsychedCms\Core\Attribute\ContentType;
 use PsychedCms\Elasticsearch\Attribute\Indexed;
 use PsychedCms\Elasticsearch\Attribute\IndexedField;
 use PsychedCms\Elasticsearch\Attribute\IndexedRelation;
@@ -119,6 +120,24 @@ final class EntityMetadataReader
         $this->relationsCache[$entityClass] = $relations;
 
         return $relations;
+    }
+
+    /**
+     * @return array<string>
+     */
+    public function getLocalesForEntity(string $entityClass): array
+    {
+        $reflectionClass = new \ReflectionClass($entityClass);
+        $attributes = $reflectionClass->getAttributes(ContentType::class);
+
+        if ($attributes !== []) {
+            $contentType = $attributes[0]->newInstance();
+            if ($contentType->locales !== null) {
+                return $contentType->locales;
+            }
+        }
+
+        return ['fr'];
     }
 
     /**

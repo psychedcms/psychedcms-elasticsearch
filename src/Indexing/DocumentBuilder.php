@@ -26,11 +26,11 @@ class DocumentBuilder
         $entityClass = $entity::class;
         $fields = $this->metadataReader->getIndexedFields($entityClass);
 
-        $document = $this->buildMetadata($entity, $entityClass, $locale);
-
         $translations = ($locale !== $defaultLocale)
             ? $this->getTranslationsForLocale($entity, $locale)
             : [];
+
+        $document = $this->buildMetadata($entity, $entityClass, $locale, $translations);
 
         foreach ($fields as $propertyName => $attribute) {
             $value = $this->extractFieldValue($entity, $propertyName, $locale, $defaultLocale, $translations);
@@ -52,9 +52,10 @@ class DocumentBuilder
     }
 
     /**
+     * @param array<string, mixed> $translations
      * @return array<string, mixed>
      */
-    private function buildMetadata(object $entity, string $entityClass, string $locale): array
+    private function buildMetadata(object $entity, string $entityClass, string $locale, array $translations = []): array
     {
         $shortName = $this->getShortName($entityClass);
 
@@ -64,7 +65,11 @@ class DocumentBuilder
         ];
 
         if (method_exists($entity, 'getSlug')) {
-            $document['_slug'] = $entity->getSlug();
+            // Use translated slug if available, fallback to entity slug
+            $translatedSlug = $translations['slug'] ?? null;
+            $document['_slug'] = ($translatedSlug !== null && $translatedSlug !== '')
+                ? $translatedSlug
+                : $entity->getSlug();
         }
 
         if (method_exists($entity, 'getStatus')) {
@@ -106,12 +111,23 @@ class DocumentBuilder
         string $defaultLocale,
         array $translations,
     ): mixed {
-        // For non-default locale translatable fields, use translations
+        // For non-default locale translatable fields, use translations with fallback to default locale
         if ($locale !== $defaultLocale && $this->isTranslatable($entity, $propertyName)) {
-            return $translations[$propertyName] ?? null;
+            $translatedValue = $translations[$propertyName] ?? null;
+
+            // Fallback to default locale value when translation is missing
+            if ($translatedValue === null || $translatedValue === '') {
+                return $this->getPropertyValue($entity, $propertyName);
+            }
+
+            return $translatedValue;
         }
 
-        // Read directly from entity
+        return $this->getPropertyValue($entity, $propertyName);
+    }
+
+    private function getPropertyValue(object $entity, string $propertyName): mixed
+    {
         $reflectionClass = new \ReflectionClass($entity);
         $property = $reflectionClass->getProperty($propertyName);
         $property->setAccessible(true);
@@ -211,10 +227,7 @@ class DocumentBuilder
      */
     private function buildRelationData(object $entity, string $propertyName, IndexedRelation $relation): array
     {
-        $reflectionClass = new \ReflectionClass($entity);
-        $property = $reflectionClass->getProperty($propertyName);
-        $property->setAccessible(true);
-        $collection = $property->getValue($entity);
+        $collection = $this->getPropertyValue($entity, $propertyName);
 
         if (!$collection instanceof \Traversable) {
             return [];

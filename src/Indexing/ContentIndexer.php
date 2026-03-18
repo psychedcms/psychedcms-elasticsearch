@@ -30,33 +30,22 @@ final class ContentIndexer implements ContentIndexerInterface
             return;
         }
 
-        $indexName = $this->nameResolver->resolve($entityClass);
         $entityId = $this->getEntityId($entity);
         $locales = $this->translationValidator->getLocales($entity);
         $defaultLocale = $this->translationValidator->getDefaultLocale($entity);
 
         foreach ($locales as $locale) {
+            $indexName = $this->nameResolver->resolveForLocale($entityClass, $locale);
             $documentId = $this->generateDocumentId($entityClass, $entityId, $locale);
+            $document = $this->documentBuilder->build($entity, $locale, $defaultLocale);
+            $this->client->index($indexName, $documentId, $document);
 
-            if ($locale === $defaultLocale || $this->translationValidator->isLocaleComplete($entity, $locale)) {
-                $document = $this->documentBuilder->build($entity, $locale, $defaultLocale);
-                $this->client->index($indexName, $documentId, $document);
-
-                $this->logger?->info('Indexed entity', [
-                    'entity' => $entityClass,
-                    'id' => $entityId,
-                    'locale' => $locale,
-                ]);
-            } else {
-                // Remove incomplete locale document
-                $this->client->delete($indexName, $documentId);
-
-                $this->logger?->debug('Removed incomplete locale document', [
-                    'entity' => $entityClass,
-                    'id' => $entityId,
-                    'locale' => $locale,
-                ]);
-            }
+            $this->logger?->info('Indexed entity', [
+                'entity' => $entityClass,
+                'id' => $entityId,
+                'locale' => $locale,
+                'index' => $indexName,
+            ]);
         }
     }
 
@@ -68,11 +57,11 @@ final class ContentIndexer implements ContentIndexerInterface
             return;
         }
 
-        $indexName = $this->nameResolver->resolve($entityClass);
         $entityId = $this->getEntityId($entity);
         $locales = $this->translationValidator->getLocales($entity);
 
         foreach ($locales as $locale) {
+            $indexName = $this->nameResolver->resolveForLocale($entityClass, $locale);
             $documentId = $this->generateDocumentId($entityClass, $entityId, $locale);
             $this->client->delete($indexName, $documentId);
         }
@@ -85,7 +74,8 @@ final class ContentIndexer implements ContentIndexerInterface
 
     public function reindexAll(string $entityClass, int $batchSize = 100): int
     {
-        $indexName = $this->nameResolver->resolve($entityClass);
+        $locales = $this->metadataReader->getLocalesForEntity($entityClass);
+        $defaultLocale = $locales[0] ?? 'fr';
 
         $query = $this->entityManager->createQueryBuilder()
             ->select('e')
@@ -93,38 +83,54 @@ final class ContentIndexer implements ContentIndexerInterface
             ->getQuery();
 
         $count = 0;
-        $bulkOperations = [];
+        /** @var array<string, list<array<string, mixed>>> $bulkByIndex */
+        $bulkByIndex = [];
 
         foreach ($query->toIterable() as $entity) {
             $entityId = $this->getEntityId($entity);
-            $locales = $this->translationValidator->getLocales($entity);
-            $defaultLocale = $this->translationValidator->getDefaultLocale($entity);
 
             foreach ($locales as $locale) {
-                if ($locale !== $defaultLocale && !$this->translationValidator->isLocaleComplete($entity, $locale)) {
-                    continue;
-                }
-
+                $indexName = $this->nameResolver->resolveForLocale($entityClass, $locale);
                 $documentId = $this->generateDocumentId($entityClass, $entityId, $locale);
                 $document = $this->documentBuilder->build($entity, $locale, $defaultLocale);
 
-                $bulkOperations[] = ['index' => ['_index' => $indexName, '_id' => $documentId]];
-                $bulkOperations[] = $document;
+                $bulkByIndex[$indexName][] = ['index' => ['_index' => $indexName, '_id' => $documentId]];
+                $bulkByIndex[$indexName][] = $document;
                 $count++;
+            }
 
-                if (\count($bulkOperations) >= $batchSize * 2) {
-                    $this->client->bulk($bulkOperations);
-                    $bulkOperations = [];
-                    $this->entityManager->clear();
+            // Flush when any index buffer exceeds batch size
+            $shouldFlush = false;
+            foreach ($bulkByIndex as $ops) {
+                if (\count($ops) >= $batchSize * 2) {
+                    $shouldFlush = true;
+                    break;
                 }
+            }
+
+            if ($shouldFlush) {
+                foreach ($bulkByIndex as $ops) {
+                    if ($ops !== []) {
+                        $this->client->bulk($ops);
+                    }
+                }
+                $bulkByIndex = [];
+                $this->entityManager->clear();
             }
         }
 
-        if ($bulkOperations !== []) {
-            $this->client->bulk($bulkOperations);
+        // Flush remaining
+        foreach ($bulkByIndex as $indexName => $ops) {
+            if ($ops !== []) {
+                $this->client->bulk($ops);
+            }
         }
 
-        $this->client->refresh($indexName);
+        // Refresh all locale indices
+        foreach ($locales as $locale) {
+            $indexName = $this->nameResolver->resolveForLocale($entityClass, $locale);
+            $this->client->refresh($indexName);
+        }
 
         $this->logger?->info('Reindexed all entities', [
             'entity' => $entityClass,

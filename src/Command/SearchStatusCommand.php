@@ -48,10 +48,11 @@ final class SearchStatusCommand extends Command
         }
 
         $rows = [];
-        foreach ($statuses as $entityClass => $status) {
+        foreach ($statuses as $status) {
             $rows[] = [
                 $status['index'],
-                $this->getShortName($entityClass),
+                $this->getShortName($status['entity']),
+                $status['locale'] ?? '-',
                 $status['exists'] ? 'Yes' : 'No',
                 $status['docs_count'] ?? '-',
                 isset($status['size']) ? $this->formatBytes($status['size']) : '-',
@@ -59,7 +60,7 @@ final class SearchStatusCommand extends Command
         }
 
         $io->table(
-            ['Index', 'Entity', 'Exists', 'Docs', 'Size'],
+            ['Index', 'Entity', 'Locale', 'Exists', 'Docs', 'Size'],
             $rows
         );
 
