@@ -132,7 +132,17 @@ class DocumentBuilder
         $property = $reflectionClass->getProperty($propertyName);
         $property->setAccessible(true);
 
-        return $property->getValue($entity);
+        // Try reading the property directly; fall back to getter for virtual/computed fields
+        if ($property->isInitialized($entity)) {
+            return $property->getValue($entity);
+        }
+
+        $getter = 'get' . ucfirst($propertyName);
+        if (method_exists($entity, $getter)) {
+            return $entity->{$getter}();
+        }
+
+        return null;
     }
 
     private function normalizeValue(mixed $value, IndexedField $attribute): mixed
