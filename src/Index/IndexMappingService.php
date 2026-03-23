@@ -44,6 +44,25 @@ final class IndexMappingService
             $properties[$propertyName] = $this->buildFieldMapping($attribute, $esType);
         }
 
+        // Include facetable fields from relations with useRelationFacets=true
+        foreach ($fields as $propertyName => $attribute) {
+            if (!$attribute->useRelationFacets) {
+                continue;
+            }
+
+            if (!isset($properties[$propertyName]['properties'])) {
+                continue;
+            }
+
+            $relationFacetMappings = $this->getRelationFacetMappings($entityClass, $propertyName);
+            if ($relationFacetMappings !== []) {
+                $properties[$propertyName]['properties'] = array_merge(
+                    $properties[$propertyName]['properties'],
+                    $relationFacetMappings
+                );
+            }
+        }
+
         // Process IndexedRelation attributes
         $relations = $this->metadataReader->getIndexedRelations($entityClass);
         foreach ($relations as $propertyName => $relation) {
@@ -90,6 +109,34 @@ final class IndexMappingService
                 ],
             ],
         ];
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function getRelationFacetMappings(string $entityClass, string $propertyName): array
+    {
+        $em = $this->metadataReader->getEntityManager();
+        $classMetadata = $em->getClassMetadata($entityClass);
+
+        if (!$classMetadata->hasAssociation($propertyName)) {
+            return [];
+        }
+
+        $targetClass = $classMetadata->getAssociationTargetClass($propertyName);
+        $targetFields = $this->metadataReader->getIndexedFields($targetClass);
+        $mappings = [];
+
+        foreach ($targetFields as $targetFieldName => $targetAttribute) {
+            if (!$targetAttribute->facetable) {
+                continue;
+            }
+
+            $targetEsType = $this->resolveEsType($targetClass, $targetFieldName, $targetAttribute);
+            $mappings[$targetFieldName] = $this->buildFieldMapping($targetAttribute, $targetEsType);
+        }
+
+        return $mappings;
     }
 
     /**

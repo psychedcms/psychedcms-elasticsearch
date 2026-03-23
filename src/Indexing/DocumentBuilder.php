@@ -132,17 +132,7 @@ class DocumentBuilder
         $property = $reflectionClass->getProperty($propertyName);
         $property->setAccessible(true);
 
-        // Try reading the property directly; fall back to getter for virtual/computed fields
-        if ($property->isInitialized($entity)) {
-            return $property->getValue($entity);
-        }
-
-        $getter = 'get' . ucfirst($propertyName);
-        if (method_exists($entity, $getter)) {
-            return $entity->{$getter}();
-        }
-
-        return null;
+        return $property->getValue($entity);
     }
 
     private function normalizeValue(mixed $value, IndexedField $attribute): mixed
@@ -182,6 +172,21 @@ class DocumentBuilder
                 $getter = 'get' . ucfirst($propName);
                 if (method_exists($value, $getter)) {
                     $data[$propName] = $this->normalizeScalar($value->{$getter}());
+                }
+            }
+
+            // Include facetable fields from the related entity
+            if ($attribute->useRelationFacets) {
+                $targetClass = \get_class($value);
+                $targetFields = $this->metadataReader->getIndexedFields($targetClass);
+                foreach ($targetFields as $fieldName => $targetAttribute) {
+                    if (!$targetAttribute->facetable || isset($data[$fieldName])) {
+                        continue;
+                    }
+                    $fieldValue = $this->getPropertyValue($value, $fieldName);
+                    if ($fieldValue !== null) {
+                        $data[$fieldName] = $this->normalizeValue($fieldValue, $targetAttribute);
+                    }
                 }
             }
 

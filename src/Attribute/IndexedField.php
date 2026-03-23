@@ -19,6 +19,8 @@ class IndexedField
         public readonly bool $facetable = false,
         public readonly ?array $properties = null,
         public readonly bool $enabled = true,
+        /** When true on a relation field, the related entity's facetable fields are included in the index and aggregated. */
+        public readonly bool $useRelationFacets = false,
     ) {
     }
 }

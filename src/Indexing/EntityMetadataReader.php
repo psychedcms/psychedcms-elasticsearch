@@ -29,6 +29,11 @@ final class EntityMetadataReader
     ) {
     }
 
+    public function getEntityManager(): EntityManagerInterface
+    {
+        return $this->entityManager;
+    }
+
     public function getIndexedAttribute(string $entityClass): ?Indexed
     {
         if (\array_key_exists($entityClass, $this->indexedCache)) {
@@ -72,6 +77,51 @@ final class EntityMetadataReader
         $this->fieldsCache[$entityClass] = $fields;
 
         return $fields;
+    }
+
+    /**
+     * Get facetable fields inherited from relations with useRelationFacets=true.
+     *
+     * @return array<string, array{path: string, attribute: IndexedField, relationType: string}>
+     */
+    public function getRelationFacetFields(string $entityClass): array
+    {
+        $fields = $this->getIndexedFields($entityClass);
+        $result = [];
+
+        foreach ($fields as $propertyName => $attribute) {
+            if (!$attribute->useRelationFacets) {
+                continue;
+            }
+
+            $classMetadata = $this->entityManager->getClassMetadata($entityClass);
+            if (!$classMetadata->hasAssociation($propertyName)) {
+                continue;
+            }
+
+            $targetClass = $classMetadata->getAssociationTargetClass($propertyName);
+            $targetFields = $this->getIndexedFields($targetClass);
+
+            foreach ($targetFields as $targetFieldName => $targetAttribute) {
+                if (!$targetAttribute->facetable) {
+                    continue;
+                }
+
+                $esType = $targetAttribute->type;
+                // For nested/object types (like genres Collection), use .name sub-path
+                $fieldPath = \in_array($esType, ['nested', 'object', null], true) && $esType !== 'keyword'
+                    ? "{$propertyName}.{$targetFieldName}.name"
+                    : "{$propertyName}.{$targetFieldName}";
+
+                $result["{$propertyName}.{$targetFieldName}"] = [
+                    'path' => $fieldPath,
+                    'attribute' => $targetAttribute,
+                    'relationType' => $esType ?? 'text',
+                ];
+            }
+        }
+
+        return $result;
     }
 
     /**
