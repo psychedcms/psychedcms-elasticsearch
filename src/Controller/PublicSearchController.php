@@ -131,7 +131,39 @@ final readonly class PublicSearchController
             }
         }
 
+        // Geo distance filter
+        $lat = $request->query->get('lat');
+        $lng = $request->query->get('lng');
+        $distance = $request->query->get('distance', '25');
+
+        if ($lat !== null && $lng !== null) {
+            $geoField = $this->resolveGeoField($contentTypes);
+
+            $filters[] = [
+                'geo_distance' => [
+                    'distance' => $distance . 'km',
+                    $geoField => [
+                        'lat' => (float) $lat,
+                        'lon' => (float) $lng,
+                    ],
+                    'ignore_unmapped' => true,
+                ],
+            ];
+        }
+
         $sort = $this->resolveSort($request);
+
+        if ($lat !== null && $lng !== null) {
+            $geoField = $this->resolveGeoField($contentTypes);
+            $sort = [
+                ['_geo_distance' => [
+                    $geoField => ['lat' => (float) $lat, 'lon' => (float) $lng],
+                    'order' => 'asc',
+                    'unit' => 'km',
+                    'ignore_unmapped' => true,
+                ]],
+            ];
+        }
 
         return [
             'from' => $from,
@@ -165,6 +197,29 @@ final readonly class PublicSearchController
         }
 
         return [['_created_at' => ['order' => 'desc', 'unmapped_type' => 'date']]];
+    }
+
+    /**
+     * Resolve the geo field path based on content types being searched.
+     * Venues have their own geolocation, events/festivals inherit from venue.
+     *
+     * @param string[] $contentTypes
+     */
+    private function resolveGeoField(array $contentTypes): string
+    {
+        // If searching only venues, use their direct geo field
+        if ($contentTypes === ['venues']) {
+            return 'geolocation.location';
+        }
+
+        // If searching only events or festivals, use venue's nested geo field
+        if (\count($contentTypes) === 1 && \in_array($contentTypes[0], ['events', 'festivals'], true)) {
+            return 'venue.geolocation.location';
+        }
+
+        // For mixed searches or no specific content type, use venue's nested field
+        // with ignore_unmapped: true to handle indexes that don't have this field
+        return 'venue.geolocation.location';
     }
 
     /**
