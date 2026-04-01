@@ -143,8 +143,17 @@ class DocumentBuilder
 
         if ($value instanceof Collection) {
             $items = [];
-            foreach ($value as $item) {
-                $items[] = $this->normalizeCollectionItem($item);
+
+            // When the attribute defines object properties, use normalizeObjectField
+            // so that explicitly declared sub-fields (id, slug, name, ...) are indexed.
+            if (\in_array($attribute->type, ['object', 'nested'], true) && $attribute->properties !== null) {
+                foreach ($value as $item) {
+                    $items[] = $this->normalizeObjectField($item, $attribute);
+                }
+            } else {
+                foreach ($value as $item) {
+                    $items[] = $this->normalizeCollectionItem($item);
+                }
             }
 
             return $items;
